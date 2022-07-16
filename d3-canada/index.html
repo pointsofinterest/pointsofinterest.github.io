@@ -85,7 +85,7 @@
         // build the boundaries
         const country = topojson.feature(canada, canada.objects.canada);
         const provinces = topojson.feature(canada,canada.objects.canada).features;
-        const bc_reg = topojson.feature(bc, bc.objects.regions).features;
+        // const bc_reg = topojson.feature(bc, bc.objects.regions).features;
 
         // get the geographic center of the county
         const canGeoCenter = d3.geoCentroid(country);
