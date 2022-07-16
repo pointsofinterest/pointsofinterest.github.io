@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="description" content="Canada Census Data">
+    <meta name="author" content="Nathan Hildebrand">
+    <title>Canada</title>
+
+    <!-- D3, TopoJSON, and JQuery libraries -->
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+    <script src="http://code.jquery.com/jquery-latest.min.js"></script>
+
+    <!-- Boundary TopoJSON -->
+    <!--<script src="canlamb-topojson/canada.js"></script>-->
+    <script src="/another-canada-topo/canada-topo.js"></script>
+    <script src="/another-canada-topo/bc-econ-reg-topo.js"></script>
+
+    <!-- Styles -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@200&display=swap');
+        .title {
+            font-family: 'Inter', sans-serif;
+            color: whitesmoke;
+            font-size: 5rem;
+            margin-left: 3rem;
+        }
+        .subtitle { 
+            font-family: 'Inter', sans-serif;
+            color: whitesmoke;
+            font-size: 1.5rem;
+            margin-left: 3rem;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            align-content: flex-start;
+        }
+        body {
+            padding: 0;
+            margin: 0;
+            background: #202c39;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            align-content: flex-start;
+        }
+        svg {
+            margin: auto;
+            display: flex;
+        }
+        .province, .bc-reg {
+            fill: whitesmoke;
+            fill-opacity: 100%;
+            transition: fill 0.25s ease-in-out;
+        }
+    </style>
+</head>
+
+<!-- Main Page -->
+<body>
+    <!-- Title Banner -->
+    <div class="heading container">
+        <p class="title"><u>Canada</u>.</p>
+        <p class="subtitle">and its status</p>
+    </div>
+
+    <!-- D3 Visualization -->
+    <div class="home"></div>
+    <script>
+        // window size
+        var width = window.innerWidth;
+        var height = window.innerHeight;
+        
+        // main containers
+        const container = d3.select(".home");
+        var svg = container.append("svg");
+
+        // svg frame, clicking outside the country boundary resets the map
+        svg.attr("width", width)
+           .attr("height", height)
+           .on('click', function () {if (!(d3.event.target.nodeName === 'path')) {reset()}});
+
+        // build the boundaries
+        const country = topojson.feature(canada, canada.objects.canada);
+        const provinces = topojson.feature(canada,canada.objects.canada).features;
+        const bc_reg = topojson.feature(bc, bc.objects.regions).features;
+
+        // get the geographic center of the county
+        const canGeoCenter = d3.geoCentroid(country);
+
+        // initialize the coordinate space 
+        var canlamb = d3.geoConicConformal() // based on FME canlamb-83
+                            .parallels([49, 77])
+                            .rotate([95, 0])
+                            .center([0, canGeoCenter[1]])
+                            .scale(1)
+                            .translate([0,0]);
+        
+        const path = d3.geoPath(canlamb);
+
+        setProjectionProperties(canlamb);
+
+        // project and scale
+        function setProjectionProperties(proj) {
+            let p = d3.geoPath(proj);
+            let b = p.bounds(country);
+            let s = 1 / Math.max((b[1][0] - b[0][0]) / width, (b[1][1] - b[0][1]) / height);
+            let t = [(width - s * (b[1][0] + b[0][0])) / 2, (height - s * (b[1][1] + b[0][1])) / 2];
+            proj.scale(s).translate(t);
+        }
+
+        // get the projected center of the country 
+        const canPathCenter = path.centroid(country);
+
+        // bind data to the path
+        const g = svg.append("g").attr("class","country");
+
+        g.selectAll("path")
+            .data(provinces)
+            .enter()
+            .append("path")
+            .attr("d", path)
+            .style("stroke", "lightgrey")
+            .style("stroke-width", 0.9)
+            .style("stroke-linejoin","round")
+            .style("opacity","1")
+            .attr("class", "province")
+            .on("click", clicked)
+            .on('mouseover', function (d) {d3.select(this).style('fill','#D8E2E9').style("transition", "fill 0.25s ease-in-out")})
+            .on('mouseleave', function (d) {d3.select(this).style('fill','whitesmoke').style("transition", "fill 0.25s ease-in-out")});
+
+        // initialize zoom control
+        const zoom = d3.zoom()
+                        .scaleExtent([1,8])
+                        .on('zoom', zoomed);
+
+        //svg.call(zoom);
+
+        function zoomed() {
+            const {transform} = d3.event;
+            g.attr('transform', transform); 
+        };
+        // reproject, pan, zoom on the fly when an area is clicked
+        function clicked(d) {
+            var f = d.properties.NAME;
+            let c = d3.geoCentroid(d);
+            let currentRotate = canlamb.rotate();
+            let currentCenter = canlamb.center();
+            let currentScale = canlamb.scale();
+            canlamb.rotate([-c[0], 0]);
+            canlamb.center([0, c[1]]);
+            path.projection(canlamb);
+            let b = path.bounds(d);
+            let nextScale = currentScale * 1 / Math.max((b[1][0] - b[0][0]) / (width), (b[1][1] - b[0][1]) / (height));
+            // reposition() needs to be aware of the new scale, so quickly set it here as j so it can be passed in to reposition().
+            canlamb.scale(nextScale);
+            path.projection(canlamb);
+            let j = path.bounds(d);
+            let nextRotate = canlamb.rotate();
+            let nextCenter = canlamb.center();
+            // transitioning
+            let t = d3.transition().duration(2000).ease(d3.easeSin);
+
+            // reveal province area stroking and increase opacity for clicked province
+            d3.selectAll('path')
+                .transition(t)
+                .filter(function (d,i) {console.log(f);console.log(d);if (d.properties.NAME == f) {return d}})
+                .style('stroke','lightgrey')
+                .styleTween('opacity', function() {return d3.interpolate(d3.select(this).node().style.opacity, "1")});
+
+            // hide province area stroking and decrease opacity for not-clicked provinces
+            d3.selectAll('path')
+                .transition(t)
+                .filter(function (d,i) {if (d.properties.NAME !== f) {return d}})
+                .style('stroke','none')
+                .styleTween('opacity', function (d) {return d3.interpolate(d3.select(this).node().style.opacity,'0.10')});
+
+            // for the selected province, add the regional boundaries
+            //if (d.properties.ername == undefined) {provFocus(d,t);};
+            
+            // reposition on the clicked province
+            d3.selectAll("path")
+                .transition(t)
+                .attrTween("d", function(d) {
+                  let r = d3.interpolate(currentRotate, nextRotate);
+                  let s = d3.interpolate(currentScale, nextScale);
+                  let c = d3.interpolate(currentCenter, nextCenter);
+                    return function(t) {
+                        canlamb
+                            .rotate(r(t))
+                            .center(c(t))
+                            .scale(currentScale > nextScale ? s(Math.pow(t,0.3)) : s(Math.pow(t,8)))
+                        path.projection(canlamb);
+                        return path(d);
+                        }             
+                    })
+                .on('end', reposition(j,t));
+        }
+        // final translation
+        function reposition(d,t) {
+            //const [[x0, y0], [x1, y1]] = path.bounds(d);
+            //let secondb = path.bounds(country);
+            let t_scale = Math.min(8, 1 / Math.max((d[1][0] - d[0][0]) / width, (d[1][1] - d[0][1]) / height));
+            g.transition(t).call(
+                zoom.transform,
+                d3.zoomIdentity
+                    .translate(width / 2, height / 2)
+                    .scale(t_scale)
+                    .translate(-(d[0][0] + d[1][0]) / 2, -(d[0][1] + d[1][1]) / 2)
+                );
+        }
+        // reset the map
+        function reset() {   
+            let currentRotate = canlamb.rotate();
+            let currentCenter = canlamb.center();
+            let currentScale = canlamb.scale();
+            canlamb.rotate([95, 0]);
+            canlamb.center([0, canGeoCenter[1]]);
+            path.projection(canlamb);
+            let b = path.bounds(country);
+            let nextScale = currentScale * 1 / Math.max((b[1][0] - b[0][0]) / (width), (b[1][1] - b[0][1]) / (height));
+            // reposition() needs to be aware of the new scale, so quickly set it here as j so it can be passed in to reposition().
+            canlamb.scale(nextScale);
+            path.projection(canlamb);
+            let j = path.bounds(country);
+            // transitioning
+            let t = d3.transition().duration(2000).ease(d3.easeSin);
+            d3.selectAll('path')
+                .transition(t)
+                .style('stroke','lightgrey')
+                .styleTween('opacity', function() {return d3.interpolate(d3.select(this).node().style.opacity, "1")})
+            
+            d3.selectAll("path")
+                .transition(t)
+                .attrTween("d", function(d) {
+                    let r = d3.interpolate(currentRotate, [95,0]);
+                    let s = d3.interpolate(currentScale, nextScale);
+                    let c = d3.interpolate(currentCenter, [0, canGeoCenter[1]]);
+                    return function(t) {
+                        canlamb
+                            .rotate(r(t))
+                            .scale(currentScale > nextScale ? s(Math.pow(t,0.4)) : s(Math.pow(t,3)))
+                            .center(c(t))
+                        path.projection(canlamb);
+                        return path(d);
+                        }             
+                    })
+                .on('end', reposition(j, t));
+        }
+
+        // adding regional boundaries for bc
+        function provFocus (d,t) {
+            g.append("g").attr("class","bc")
+            .selectAll("path")
+            .data(bc_reg)
+            .enter()
+            .append('path')
+            .attr("d", path)
+            .style("fill","whitesmoke")
+            .style("stroke","lightgrey")
+            .style("stroke-width","0.5")
+            .style('opacity','1')
+            .attr("class", "bc-reg")
+            .style("stroke-linejoin","round")
+            .on('click', clicked)
+            .on('mouseover', function (d) {d3.select(this).style('fill','#D8E2E9').style("transition", "fill 0.25s ease-in-out")})
+            .on('mouseleave', function (d) {d3.select(this).style('fill','whitesmoke').style("transition", "fill 0.25s ease-in-out")});
+        }
+  </script>
+</body>
+</html>
